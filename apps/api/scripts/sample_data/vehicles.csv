@@ -1,0 +1,4 @@
+plateNo,vehicleType,capacity,brand,model,year,isActive
+51C12345,XE_TAI,10.5,HYUNDAI,HD120,2020,true
+51C67890,XE_BEN,15.0,HINO,500,2021,true
+62C11111,XE_TAI,12.0,ISUZU,FVR,2019,true

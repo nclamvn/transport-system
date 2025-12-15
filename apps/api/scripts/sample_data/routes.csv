@@ -1,0 +1,4 @@
+code,name,originCode,destinationCode,distance,defaultRatePerTon,isActive
+R001,Mo DaLat - Cang SG,MO1,CSG,300,150000,true
+R002,Mo BD - Kho TC,MO2,KHO1,50,80000,true
+R003,Kho TC - Nha may,KHO1,NM1,30,60000,true

@@ -1,0 +1,6 @@
+code,name,type,address,isActive
+MO1,Mo Da Lat,MINE,Lam Dong,true
+MO2,Mo Binh Duong,MINE,Binh Duong,true
+KHO1,Kho Tan Cang,WAREHOUSE,TP.HCM,true
+CSG,Cang Sai Gon,PORT,TP.HCM,true
+NM1,Nha may Xi Mang,FACTORY,Binh Duong,true

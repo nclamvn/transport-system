@@ -1,0 +1,395 @@
+// Prisma Schema for Transport System
+// STEP 1: Core Data + Auth + Audit
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ==================== AUTH & USERS ====================
+
+enum Role {
+  ADMIN
+  DISPATCHER
+  HR
+  DRIVER
+}
+
+model User {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  password  String
+  name      String
+  phone     String?
+  isActive  Boolean  @default(true)
+  roles     Role[]   @default([DRIVER])
+
+  // Relations
+  driver    Driver?
+
+  // Audit
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Audit logs created by this user
+  auditLogs AuditLog[]
+
+  @@map("users")
+}
+
+// ==================== CORE DOMAIN ====================
+
+model Driver {
+  id           String   @id @default(cuid())
+  employeeCode String   @unique // Ma nhan vien
+  name         String
+  phone        String?
+  licenseNo    String?  // So GPLX
+  licenseType  String?  // Hang GPLX (B2, C, D, E...)
+  isActive     Boolean  @default(true)
+
+  // Link to user account (optional - driver may not have login)
+  userId       String?  @unique
+  user         User?    @relation(fields: [userId], references: [id])
+
+  // Relations
+  trips        Trip[]
+  salaryResults SalaryResult[]
+
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@map("drivers")
+}
+
+model Vehicle {
+  id            String   @id @default(cuid())
+  plateNo       String   @unique // Bien so xe
+  vehicleType   String   // Loai xe (xe tai, xe ben, xe dau keo...)
+  capacity      Decimal? @db.Decimal(10, 2) // Trong tai (tan)
+  brand         String?
+  model         String?
+  year          Int?
+  isActive      Boolean  @default(true)
+
+  // Relations
+  trips         Trip[]
+
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@map("vehicles")
+}
+
+model Station {
+  id          String   @id @default(cuid())
+  code        String   @unique // Ma tram
+  name        String
+  type        StationType
+  address     String?
+  lat         Decimal? @db.Decimal(10, 8)
+  lng         Decimal? @db.Decimal(11, 8)
+  isActive    Boolean  @default(true)
+
+  // Relations - as origin or destination
+  routesFrom  Route[]  @relation("RouteOrigin")
+  routesTo    Route[]  @relation("RouteDestination")
+  tripsFrom   Trip[]   @relation("TripOrigin")
+  tripsTo     Trip[]   @relation("TripDestination")
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@map("stations")
+}
+
+enum StationType {
+  MINE      // Mo
+  WAREHOUSE // Kho
+  PORT      // Cang
+  FACTORY   // Nha may
+  OTHER
+}
+
+model Route {
+  id           String   @id @default(cuid())
+  code         String   @unique // Ma tuyen
+  name         String
+
+  // Origin & Destination
+  originId     String
+  origin       Station  @relation("RouteOrigin", fields: [originId], references: [id])
+  destinationId String
+  destination  Station  @relation("RouteDestination", fields: [destinationId], references: [id])
+
+  distance     Decimal? @db.Decimal(10, 2) // Khoang cach (km)
+
+  // Default pricing - will be overridden by salary rules
+  defaultRatePerTon Decimal? @db.Decimal(12, 2)
+
+  isActive     Boolean  @default(true)
+
+  // Relations
+  trips        Trip[]
+  salaryRules  SalaryRule[]
+
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@map("routes")
+}
+
+// ==================== TRIPS (CORE) ====================
+
+enum TripStatus {
+  DRAFT       // Nhap, chua gui
+  PENDING     // Cho duyet
+  APPROVED    // Da duyet
+  REJECTED    // Tu choi
+  EXCEPTION   // Can xu ly ngoai le
+}
+
+model Trip {
+  id           String     @id @default(cuid())
+  tripCode     String     @unique // Ma chuyen - auto generate
+
+  // Core info
+  driverId     String
+  driver       Driver     @relation(fields: [driverId], references: [id])
+  vehicleId    String
+  vehicle      Vehicle    @relation(fields: [vehicleId], references: [id])
+  routeId      String
+  route        Route      @relation(fields: [routeId], references: [id])
+
+  // Origin & Destination (may override route)
+  originId     String
+  origin       Station    @relation("TripOrigin", fields: [originId], references: [id])
+  destinationId String
+  destination  Station    @relation("TripDestination", fields: [destinationId], references: [id])
+
+  // Timing
+  tripDate     DateTime   @db.Date
+  departureTime DateTime?
+  arrivalTime  DateTime?
+
+  // Weight - THE CORE DATA for salary calculation
+  weightLoaded   Decimal?  @db.Decimal(10, 3) // Khoi luong boc (tan)
+  weightUnloaded Decimal?  @db.Decimal(10, 3) // Khoi luong do (tan)
+  weightFinal    Decimal?  @db.Decimal(10, 3) // Khoi luong chot (tan) - used for salary
+
+  // Status & workflow
+  status       TripStatus @default(DRAFT)
+
+  // Notes
+  note         String?
+  rejectionReason String?
+
+  // Relations
+  records      TripRecord[]
+
+  // Soft delete
+  deletedAt    DateTime?
+
+  // Audit
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+
+  @@index([driverId, tripDate])
+  @@index([status, tripDate])
+  @@index([deletedAt])
+  @@map("trips")
+}
+
+// Trip attachments (phieu can, anh chung tu)
+model TripRecord {
+  id          String   @id @default(cuid())
+  tripId      String
+  trip        Trip     @relation(fields: [tripId], references: [id], onDelete: Cascade)
+
+  recordType  TripRecordType
+
+  // For weight tickets
+  ticketNo    String?  // So phieu can
+  weight      Decimal? @db.Decimal(10, 3)
+  weighedAt   DateTime?
+
+  // For attachments
+  fileUrl     String?
+  fileName    String?
+  fileType    String?
+
+  note        String?
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@map("trip_records")
+}
+
+enum TripRecordType {
+  WEIGHT_TICKET_LOAD    // Phieu can boc
+  WEIGHT_TICKET_UNLOAD  // Phieu can do
+  PHOTO                 // Anh chung tu
+  DOCUMENT              // Tai lieu khac
+}
+
+// ==================== SALARY ====================
+
+model SalaryRule {
+  id          String   @id @default(cuid())
+  name        String
+  description String?
+
+  // Version control - rules are immutable, new version = new record
+  version     Int      @default(1)
+  isActive    Boolean  @default(true)
+  effectiveFrom DateTime @db.Date
+  effectiveTo   DateTime? @db.Date
+
+  // Rule type
+  ruleType    SalaryRuleType
+
+  // Conditions (JSON for flexibility)
+  // Example: { "routeId": "xxx", "minWeight": 10 }
+  conditions  Json?
+
+  // Calculation config (JSON)
+  // For v1: { "ratePerTon": 100000 }
+  configJson  Json?
+
+  // Calculation
+  // For PER_TON: rate per ton
+  // For PER_TRIP: rate per trip
+  // For BONUS: bonus amount
+  rateAmount  Decimal  @db.Decimal(12, 2)
+
+  // Optional route-specific
+  routeId     String?
+  route       Route?   @relation(fields: [routeId], references: [id])
+
+  // Created by
+  createdById String?
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([isActive, effectiveFrom])
+  @@map("salary_rules")
+}
+
+enum SalaryRuleType {
+  PER_TON       // Tinh theo tan
+  PER_TRIP      // Tinh theo chuyen
+  BONUS         // Thuong
+  PENALTY       // Phat
+  ALLOWANCE     // Phu cap
+}
+
+model SalaryPeriod {
+  id           String   @id @default(cuid())
+  code         String   @unique // VD: "2025-12-P1"
+  name         String   // VD: "Ky 1 thang 12/2025"
+
+  periodStart  DateTime @db.Date
+  periodEnd    DateTime @db.Date
+
+  status       SalaryPeriodStatus @default(OPEN)
+
+  // Lock info
+  lockedAt     DateTime?
+  lockedById   String?
+
+  // Relations
+  results      SalaryResult[]
+
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@map("salary_periods")
+}
+
+enum SalaryPeriodStatus {
+  OPEN        // Dang nhap lieu
+  CALCULATING // Dang tinh
+  REVIEW      // Cho duyet
+  LOCKED      // Da chot
+}
+
+model SalaryResult {
+  id            String   @id @default(cuid())
+
+  periodId      String
+  period        SalaryPeriod @relation(fields: [periodId], references: [id])
+  driverId      String
+  driver        Driver   @relation(fields: [driverId], references: [id])
+
+  // Summary
+  totalTrips    Int      @default(0)
+  totalWeight   Decimal  @db.Decimal(12, 3) @default(0)
+
+  // Calculated amounts (VND)
+  baseSalary    Decimal  @db.Decimal(15, 2) @default(0)
+  bonus         Decimal  @db.Decimal(15, 2) @default(0)
+  penalty       Decimal  @db.Decimal(15, 2) @default(0)
+  allowance     Decimal  @db.Decimal(15, 2) @default(0)
+  totalSalary   Decimal  @db.Decimal(15, 2) @default(0)
+
+  // Calculation details (JSON for audit)
+  // Stores breakdown of how each amount was calculated
+  calculationDetails Json?
+
+  // Recalculation tracking
+  calculatedAt  DateTime @default(now())
+  calculationVersion Int @default(1)
+  ruleVersionUsed String? // Rule ID used for this calculation
+
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@unique([periodId, driverId])
+  @@map("salary_results")
+}
+
+// ==================== AUDIT LOG ====================
+
+model AuditLog {
+  id          String   @id @default(cuid())
+
+  // What changed
+  entity      String   // Table name: trips, drivers, salary_results...
+  entityId    String   // ID of the record
+  action      AuditAction
+
+  // Change details
+  before      Json?    // State before change (null for CREATE)
+  after       Json?    // State after change (null for DELETE)
+  changes     Json?    // Only the changed fields
+
+  // Who & when
+  userId      String?
+  user        User?    @relation(fields: [userId], references: [id])
+  userEmail   String?  // Backup in case user is deleted
+
+  // Context
+  ipAddress   String?
+  userAgent   String?
+  requestId   String?  // Correlation ID for tracing
+
+  createdAt   DateTime @default(now())
+
+  @@index([entity, entityId])
+  @@index([userId, createdAt])
+  @@index([createdAt])
+  @@index([requestId])
+  @@map("audit_logs")
+}
+
+enum AuditAction {
+  CREATE
+  UPDATE
+  DELETE
+}

@@ -1,0 +1,4 @@
+employeeCode,name,phone,licenseNo,licenseType,isActive
+TX0001,Nguyen Van A,0912345678,B2-123456,C,true
+TX0002,Tran Van B,0987654321,B2-234567,C,true
+TX0003,Le Van C,0909123456,B2-345678,D,true
